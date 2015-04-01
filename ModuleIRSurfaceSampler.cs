@@ -39,12 +39,15 @@ namespace IRSurfaceSampler
 		public float drillDistance;
 		[KSPField]
 		public string animationName;
+		[KSPField]
+		public string audioFile;
 
 		private Animation anim;
 		private float scale;
 		private float lastUpdate = 0f;
 		private float updateInterval = 0.5f;
-		private Transform t;
+		private AudioClip newClip = null;
+		private AudioSource soundSource = null;
 		private ScienceExperiment surfaceExp;
 		private ScienceExperiment asteroidExp;
 		private List<ScienceData> dataList = new List<ScienceData>();
@@ -58,13 +61,31 @@ namespace IRSurfaceSampler
 				anim = part.FindModelAnimators(animationName)[0];
 			if (!string.IsNullOrEmpty(experimentID))
 				surfaceExp = ResearchAndDevelopment.GetExperiment(experimentID);
-			if (!string.IsNullOrEmpty(asteroidExperimentID))
-				asteroidExp = ResearchAndDevelopment.GetExperiment(asteroidExperimentID);
+			asteroidExp = ResearchAndDevelopment.GetExperiment(asteroidExperimentID);
 			if (!string.IsNullOrEmpty(experimentActionName))
 			{
 				Events["DeployExperiment"].guiName = experimentActionName;
 				Actions["DeployAction"].guiName = experimentActionName;
 				Actions["DeployAction"].active = useActionGroups;
+			}
+			if (!string.IsNullOrEmpty(audioFile))
+			{
+				newClip = GameDatabase.Instance.GetAudioClip(audioFile);
+				if (newClip != null)
+				{
+					soundSource = part.gameObject.AddComponent<AudioSource>();
+					soundSource.rolloffMode = AudioRolloffMode.Logarithmic;
+					soundSource.dopplerLevel = 0f;
+					soundSource.panLevel = 1f;
+					soundSource.maxDistance = 10f;
+					soundSource.playOnAwake = false;
+					soundSource.loop = false;
+					soundSource.volume = GameSettings.SHIP_VOLUME;
+					soundSource.clip = newClip;
+					soundSource.Stop();
+				}
+				else
+					Debug.LogError("[IRSurfaceSampler] Error locating audio file at location: " + audioFile);
 			}
 		}
 
@@ -93,7 +114,7 @@ namespace IRSurfaceSampler
 		//Update the KSPEvents and check for asteroids nearby; run only twice per second
 		private void Update()
 		{
-			if (HighLogic.LoadedSceneIsFlight)
+			if (HighLogic.LoadedSceneIsFlight && FlightGlobals.ready)
 			{
 				float deltaTime = 1f;
 				if (Time.deltaTime != 0)
@@ -109,8 +130,8 @@ namespace IRSurfaceSampler
 						Events["DeployExperiment"].active = true;
 					else
 						Events["DeployExperiment"].active = false;
+					eventsCheck();
 				}
-				eventsCheck();
 			}
 		}
 
@@ -126,10 +147,9 @@ namespace IRSurfaceSampler
 		//This overrides the base Deploy Experiment event, if the drill distance checks out it starts a timer to begin the experiment
 		new public void DeployExperiment()
 		{
-			ModuleAsteroid modAst;
-
 			if (!Deployed)
 			{
+				ModuleAsteroid modAst = null;
 				if (drillDistanceCheck(out modAst))
 				{
 					drillAnimate();
@@ -211,6 +231,8 @@ namespace IRSurfaceSampler
 		//the asteroid sample data.
 		private bool drillDistanceCheck(out ModuleAsteroid m)
 		{
+			Transform t = null;
+
 			if (!string.IsNullOrEmpty(drillTransform))
 				t = part.FindModelTransform(drillTransform);
 			if (!float.IsNaN(drillDistance))
@@ -229,17 +251,32 @@ namespace IRSurfaceSampler
 			Ray ray = new Ray(pos, t.forward);
 
 			//This section handles any changes in the part's size by TweakScale
-			//If the TweakScale module uses the free resize option it may need to be altered
-			//because this reports the scale as a percentage, rather than an multiplier (I think)
+			//If the TweakScale module uses the free scale resize option the value will be
+			//reported as a percentage, rather than an multiplier
 			if (part.Modules.Contains("TweakScale"))
 			{
 				PartModule pM = part.Modules["TweakScale"];
 				if (pM.Fields.GetValue("currentScale") != null)
 				{
+					bool free = false;
+					if (pM.Fields.GetValue("isFreeScale") != null)
+					{
+						try
+						{
+							free = pM.Fields.GetValue<bool>("isFreeScale");
+						}
+						catch (Exception e)
+						{
+							Debug.LogError("[IRSurfaceSampler] Error in detecting TweakScale type; asuming not freeScale : " + e);
+						}
+					}
 					float tweakedScale = 1f;
 					try
 					{
 						tweakedScale = pM.Fields.GetValue<float>("currentScale");
+						//Divide by 100 if the tweakscale value returns a percentage
+						if (free)
+							tweakedScale /= 100;
 					}
 					catch (Exception e)
 					{
@@ -278,7 +315,7 @@ namespace IRSurfaceSampler
 				int i = 0;
 
 				//This loop keeps moving up the chain looking for a transform with a name that matches the current celestial body's name; it stops at a certain point
-				while (hitT != null && i < 200)
+				while (hitT != null && i < 100)
 				{
 					if (hitT.name.Contains(vessel.mainBody.name))
 						return true;
@@ -290,16 +327,31 @@ namespace IRSurfaceSampler
 			return false;
 		}
 
-		//A simple animation method
+		//A simple animation method; also plays the audio file
 		private void drillAnimate()
 		{
 			if (anim != null)
 			{
 				if (!anim.IsPlaying(animationName))
 				{
+					playAudioClip();
 					anim[animationName].speed = 1f;
 					anim[animationName].normalizedTime = 0f;
 					anim.Blend(animationName, 1f);
+				}
+			}
+		}
+
+		private void playAudioClip()
+		{
+			if (soundSource != null)
+			{
+				if (newClip != null)
+				{
+					if (!soundSource.isPlaying)
+					{
+						soundSource.Play();
+					}
 				}
 			}
 		}
@@ -332,19 +384,21 @@ namespace IRSurfaceSampler
 					else
 						biome = ScienceUtil.GetExperimentBiome(vessel.mainBody, vessel.latitude, vessel.longitude);
 				}
+
+				if (m != null)
+					sub = ResearchAndDevelopment.GetExperimentSubject(exp, expSit, m.part.partInfo.name + m.part.flightID, m.part.partInfo.title, vessel.mainBody, biome);
+				else
+					sub = ResearchAndDevelopment.GetExperimentSubject(exp, expSit, vessel.mainBody, biome);
+
+				if (sub == null)
+					return null;
+
+				data = new ScienceData(exp.baseValue * exp.dataScale, this.xmitDataScalar, 0f, sub.id, sub.title);
+
+				return data;
 			}
 
-			if (m != null)
-				sub = ResearchAndDevelopment.GetExperimentSubject(exp, expSit, m.part.partInfo.name + m.part.flightID, m.part.partInfo.title, vessel.mainBody, biome);
-			else
-				sub = ResearchAndDevelopment.GetExperimentSubject(exp, expSit, vessel.mainBody, biome);
-
-			if (sub == null)
-				return null;
-
-			data = new ScienceData(exp.baseValue * exp.dataScale, this.xmitDataScalar, 1f, sub.id, sub.title);
-
-			return data;
+			return null;
 		}
 
 		/* These methods handle the basic KSPEvents and EVA events for reviewing and discarding data */
@@ -489,18 +543,14 @@ namespace IRSurfaceSampler
 			if (dataList.Contains(data))
 			{
 				Inoperable = !IsRerunnable();
-				if (!Inoperable)
-					Deployed = false;
+				Deployed = Inoperable;
 				dataList.Remove(data);
 			}
 		}
 
 		new private bool IsRerunnable()
 		{
-			if (rerunnable)
-				return true;
-			else
-				return false;
+			return rerunnable;
 		}
 
 	}
