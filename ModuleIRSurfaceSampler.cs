@@ -39,11 +39,15 @@ namespace IRSurfaceSampler
 		public float drillDistance;
 		[KSPField]
 		public string animationName;
+		[KSPField]
+		public string audioFile;
 
 		private Animation anim;
 		private float scale;
 		private float lastUpdate = 0f;
 		private float updateInterval = 0.5f;
+		private AudioClip newClip = null;
+		private AudioSource soundSource = null;
 		private ScienceExperiment surfaceExp;
 		private ScienceExperiment asteroidExp;
 		private List<ScienceData> dataList = new List<ScienceData>();
@@ -64,6 +68,22 @@ namespace IRSurfaceSampler
 				Events["DeployExperiment"].guiName = experimentActionName;
 				Actions["DeployAction"].guiName = experimentActionName;
 				Actions["DeployAction"].active = useActionGroups;
+			}
+			if (!string.IsNullOrEmpty(audioFile))
+			{
+				print("[IR] Setting Audio Clip: " + audioFile);
+				newClip = GameDatabase.Instance.GetAudioClip(audioFile);
+				if (newClip != null)
+				{
+					print("[IR] Setting AudioSource");
+					soundSource = base.gameObject.AddComponent<AudioSource>();
+					soundSource.playOnAwake = false;
+					soundSource.loop = false;
+					soundSource.volume = GameSettings.SHIP_VOLUME;
+					soundSource.clip = newClip;
+					soundSource.Stop();
+					print("[IR] Audio Set");
+				}
 			}
 		}
 
@@ -92,7 +112,7 @@ namespace IRSurfaceSampler
 		//Update the KSPEvents and check for asteroids nearby; run only twice per second
 		private void Update()
 		{
-			if (HighLogic.LoadedSceneIsFlight)
+			if (HighLogic.LoadedSceneIsFlight && FlightGlobals.ready)
 			{
 				float deltaTime = 1f;
 				if (Time.deltaTime != 0)
@@ -233,15 +253,18 @@ namespace IRSurfaceSampler
 			//reported as a percentage, rather than an multiplier
 			if (part.Modules.Contains("TweakScale"))
 			{
+				print("[IRSurfaceSampler] TweakScale Module Located");
 				PartModule pM = part.Modules["TweakScale"];
 				if (pM.Fields.GetValue("currentScale") != null)
 				{
+					print("[IRSurfaceSampler] TweakScale Value located");
 					bool free = false;
 					if (pM.Fields.GetValue("isFreeScale") != null)
 					{
 						try
 						{
 							free = pM.Fields.GetValue<bool>("isFreeScale");
+							print("[IRSurfaceSampler] TweakScale FreeScale Value Set : " + free.ToString());
 						}
 						catch (Exception e)
 						{
@@ -253,6 +276,7 @@ namespace IRSurfaceSampler
 					{
 						tweakedScale = pM.Fields.GetValue<float>("currentScale");
 						//Divide by 100 if the tweakscale value returns a percentage
+						print("[IRSurfaceSampler] TweakScale Value Set: " + tweakedScale.ToString());
 						if (free)
 							tweakedScale /= 100;
 					}
@@ -305,16 +329,35 @@ namespace IRSurfaceSampler
 			return false;
 		}
 
-		//A simple animation method
+		//A simple animation method; also plays the audio file
 		private void drillAnimate()
 		{
 			if (anim != null)
 			{
 				if (!anim.IsPlaying(animationName))
 				{
+					playAudioClip();
 					anim[animationName].speed = 1f;
 					anim[animationName].normalizedTime = 0f;
 					anim.Blend(animationName, 1f);
+				}
+			}
+		}
+
+		private void playAudioClip()
+		{
+			print("[IR] Checking Audio Clip");
+			if (soundSource != null)
+			{
+				print("[IR] Audio Source Found");
+				if (newClip != null)
+				{
+					print("[IR] Audio Clip Found");
+					if (!soundSource.isPlaying)
+					{
+						soundSource.Play();
+						print("[IR] Audio Clip Playing");
+					}
 				}
 			}
 		}
