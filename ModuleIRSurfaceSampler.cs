@@ -177,6 +177,7 @@ namespace IRSurfaceSampler
 			ScienceData data = sampleData(m);
 			if (data != null)
 			{
+				GameEvents.OnExperimentDeployed.Fire(data);
 				dataList.Add(data);
 				ReviewData();
 				Deployed = true;
