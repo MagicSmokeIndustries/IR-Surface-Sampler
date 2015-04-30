@@ -444,6 +444,17 @@ namespace IRSurfaceSampler
 			}
 		}
 
+		new public void DeployExperimentExternal()
+		{
+			if (FlightGlobals.ActiveVessel.isEVA)
+			{
+				if (!ScienceUtil.RequiredUsageExternalAvailable(part.vessel, FlightGlobals.ActiveVessel, (ExperimentUsageReqs)usageReqMaskExternal, surfaceExp, ref usageReqMessage))
+					ScreenMessages.PostScreenMessage("IR Surface Sampler does not meet the requirements for EVA experiment deployment", 6f, ScreenMessageStyle.UPPER_LEFT);
+				else
+					DeployExperiment();
+			}
+		}
+
 		/* These methods handle generating and interacting with the science results page */
 
 		private void newResultPage()
