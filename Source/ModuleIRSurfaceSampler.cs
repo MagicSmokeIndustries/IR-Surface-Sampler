@@ -142,6 +142,8 @@ namespace IRSurfaceSampler
 			Events["ReviewDataEvent"].active = dataList.Count > 0;
 			Events["ResetExperimentExternal"].active = dataList.Count > 0;
 			Events["CollectDataExternalEvent"].active = dataList.Count > 0;
+			Events["DeployExperimentExternal"].active = Events["DeployExperiment"].active;
+			Events["CleanUpExperimentExternal"].active = Inoperable;
 		}
 
 		//This overrides the base Deploy Experiment event, if the drill distance checks out it starts a timer to begin the experiment
@@ -177,6 +179,7 @@ namespace IRSurfaceSampler
 			ScienceData data = sampleData(m);
 			if (data != null)
 			{
+				GameEvents.OnExperimentDeployed.Fire(data);
 				dataList.Add(data);
 				ReviewData();
 				Deployed = true;
@@ -440,6 +443,17 @@ namespace IRSurfaceSampler
 				if (EVACont.First().StoreData(new List<IScienceDataContainer> { this }, false))
 					foreach (ScienceData data in dataList)
 						DumpData(data);
+			}
+		}
+
+		new public void DeployExperimentExternal()
+		{
+			if (FlightGlobals.ActiveVessel.isEVA)
+			{
+				if (!ScienceUtil.RequiredUsageExternalAvailable(part.vessel, FlightGlobals.ActiveVessel, (ExperimentUsageReqs)usageReqMaskExternal, surfaceExp, ref usageReqMessage))
+					ScreenMessages.PostScreenMessage("IR Surface Sampler does not meet the requirements for EVA experiment deployment", 6f, ScreenMessageStyle.UPPER_LEFT);
+				else
+					DeployExperiment();
 			}
 		}
 
