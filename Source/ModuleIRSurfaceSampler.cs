@@ -142,6 +142,8 @@ namespace IRSurfaceSampler
 			Events["ReviewDataEvent"].active = dataList.Count > 0;
 			Events["ResetExperimentExternal"].active = dataList.Count > 0;
 			Events["CollectDataExternalEvent"].active = dataList.Count > 0;
+			Events["DeployExperimentExternal"].active = Events["DeployExperiment"].active;
+			Events["CleanUpExperimentExternal"].active = Inoperable;
 		}
 
 		//This overrides the base Deploy Experiment event, if the drill distance checks out it starts a timer to begin the experiment
