@@ -124,12 +124,16 @@ namespace IRSurfaceSampler
 				if (((Time.time * deltaTime) - lastUpdate) > updateInterval)
 				{
 					lastUpdate = Time.time;
-					if (asteroidInRange() && !Deployed)
-						Events["DeployExperiment"].active = true;
-					else if ((vessel.situation == Vessel.Situations.LANDED || vessel.situation == Vessel.Situations.SPLASHED || vessel.situation == Vessel.Situations.PRELAUNCH) && !Deployed)
-						Events["DeployExperiment"].active = true;
-					else
+					if (Deployed)
 						Events["DeployExperiment"].active = false;
+					else
+					{
+						if (asteroidInRange())
+							Events["DeployExperiment"].active = true;
+						else if (vessel.situation == Vessel.Situations.LANDED || vessel.situation == Vessel.Situations.SPLASHED || vessel.situation == Vessel.Situations.PRELAUNCH)
+							Events["DeployExperiment"].active = true;
+					}
+
 					eventsCheck();
 				}
 			}
@@ -253,42 +257,6 @@ namespace IRSurfaceSampler
 			Vector3 pos = t.position;
 			Ray ray = new Ray(pos, t.forward);
 
-			//This section handles any changes in the part's size by TweakScale
-			//If the TweakScale module uses the free scale resize option the value will be
-			//reported as a percentage, rather than an multiplier
-			if (part.Modules.Contains("TweakScale"))
-			{
-				PartModule pM = part.Modules["TweakScale"];
-				if (pM.Fields.GetValue("currentScale") != null)
-				{
-					bool free = false;
-					if (pM.Fields.GetValue("isFreeScale") != null)
-					{
-						try
-						{
-							free = pM.Fields.GetValue<bool>("isFreeScale");
-						}
-						catch (Exception e)
-						{
-							Debug.LogError("[IRSurfaceSampler] Error in detecting TweakScale type; asuming not freeScale : " + e);
-						}
-					}
-					float tweakedScale = 1f;
-					try
-					{
-						tweakedScale = pM.Fields.GetValue<float>("currentScale");
-						//Divide by 100 if the tweakscale value returns a percentage
-						if (free)
-							tweakedScale /= 100;
-					}
-					catch (Exception e)
-					{
-						Debug.LogError("[IRSurfaceSampler] Error in detecting TweakScale component; reset distance scale to 1 : " + e);
-					}
-					scale *= tweakedScale;
-				}
-			}
-
 			Physics.Raycast(ray, out hit, scale);
 
 			if (hit.collider != null)
@@ -396,7 +364,7 @@ namespace IRSurfaceSampler
 				if (sub == null)
 					return null;
 
-				data = new ScienceData(exp.baseValue * exp.dataScale, this.xmitDataScalar, 0f, sub.id, sub.title);
+				data = new ScienceData(exp.baseValue * exp.dataScale, this.xmitDataScalar, 0f, sub.id, sub.title, false, part.flightID);
 
 				return data;
 			}
@@ -537,6 +505,11 @@ namespace IRSurfaceSampler
 			return IsRerunnable();
 		}
 
+		void IScienceDataContainer.ReturnData(ScienceData data)
+		{
+			ReturnData(data);
+		}
+
 		void IScienceDataContainer.ReviewData()
 		{
 			ReviewData();
@@ -550,6 +523,17 @@ namespace IRSurfaceSampler
 		void IScienceDataContainer.DumpData(ScienceData data)
 		{
 			DumpData(data);
+		}
+
+		new private void ReturnData(ScienceData data)
+		{
+			if (data == null)
+				return;
+
+			dataList.Add(data);
+
+			Inoperable = false;
+			Deployed = true;
 		}
 
 		new private void DumpData(ScienceData data)
