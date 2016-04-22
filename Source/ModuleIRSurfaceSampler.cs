@@ -28,6 +28,7 @@ using System.Collections.Generic;
 using System.Collections;
 using System.Linq;
 using UnityEngine;
+using KSP.UI.Screens.Flight.Dialogs;
 
 namespace IRSurfaceSampler
 {
@@ -76,7 +77,6 @@ namespace IRSurfaceSampler
 					soundSource = part.gameObject.AddComponent<AudioSource>();
 					soundSource.rolloffMode = AudioRolloffMode.Logarithmic;
 					soundSource.dopplerLevel = 0f;
-					soundSource.panLevel = 1f;
 					soundSource.maxDistance = 10f;
 					soundSource.playOnAwake = false;
 					soundSource.loop = false;
@@ -112,7 +112,7 @@ namespace IRSurfaceSampler
 		}
 
 		//Update the KSPEvents and check for asteroids nearby; run only twice per second
-		private void Update()
+		new public void Update()
 		{
 			if (HighLogic.LoadedSceneIsFlight && FlightGlobals.ready)
 			{
@@ -432,7 +432,7 @@ namespace IRSurfaceSampler
 			if (dataList.Count > 0)
 			{
 				ScienceData data = dataList[0];
-				ExperimentResultDialogPage page = new ExperimentResultDialogPage(part, data, data.transmitValue, xmitDataScalar / 2f, !rerunnable, transmitWarningText, true, data.labBoost < 1 && checkLabOps() && xmitDataScalar < 1, new Callback<ScienceData>(onDiscardData), new Callback<ScienceData>(onKeepData), new Callback<ScienceData>(onTransmitData), new Callback<ScienceData>(onSendToLab));
+				ExperimentResultDialogPage page = new ExperimentResultDialogPage(part, data, data.transmitValue, ModuleScienceLab.GetBoostForVesselData(vessel, data), !rerunnable, transmitWarningText, true, new ScienceLabSearch(vessel, data), new Callback<ScienceData>(onDiscardData), new Callback<ScienceData>(onKeepData), new Callback<ScienceData>(onTransmitData), new Callback<ScienceData>(onSendToLab));
 				ExperimentsResultDialog.DisplayResult(page);
 			}
 		}
@@ -459,32 +459,20 @@ namespace IRSurfaceSampler
 				DumpData(data);
 			}
 			else
-				ScreenMessages.PostScreenMessage("No transmitters available on this vessel.", 4f, ScreenMessageStyle.UPPER_LEFT);
+				ScreenMessages.PostScreenMessage("No Comms Devices on this vessel. Cannot Transmit Data.", 3f, ScreenMessageStyle.UPPER_CENTER);
 		}
 
 		private void onSendToLab(ScienceData data)
 		{
-			List<ModuleScienceLab> labList = vessel.FindPartModulesImplementing<ModuleScienceLab>();
-			if (checkLabOps() && dataList.Count > 0)
-				labList.OrderBy(ScienceUtil.GetLabScore).First().StartCoroutine(labList.First().ProcessData(data, new Callback<ScienceData>(onComplete)));
-			else
-				ScreenMessages.PostScreenMessage("No operational lab modules on this vessel. Cannot analyze data.", 4f, ScreenMessageStyle.UPPER_CENTER);
-		}
+			ScienceLabSearch labSearch = new ScienceLabSearch(vessel, data);
 
-		private void onComplete(ScienceData data)
-		{
-			ReviewData();
-		}
-
-		private bool checkLabOps()
-		{
-			List<ModuleScienceLab> labList = vessel.FindPartModulesImplementing<ModuleScienceLab>();
-			for (int i = 0; i < labList.Count; i++)
+			if (labSearch.NextLabForDataFound)
 			{
-				if (labList[i].IsOperational())
-					return true;
+				StartCoroutine(labSearch.NextLabForData.ProcessData(data, null));
+				DumpData(data);
 			}
-			return false;
+			else
+				labSearch.PostErrorToScreen();
 		}
 
 		/* These methods handle the IScienceDataContainer Interface which is used by external modules to access
