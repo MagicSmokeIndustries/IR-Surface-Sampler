@@ -52,9 +52,17 @@ namespace IRSurfaceSampler
 		private ScienceExperiment surfaceExp;
 		private ScienceExperiment asteroidExp;
 		private List<ScienceData> dataList = new List<ScienceData>();
+		private ExperimentsResultDialog resultsDialog;
 
 		private const string potato = "PotatoRoid";
 		private const string asteroidExperimentID = "asteroidSample";
+
+		public override void OnAwake()
+		{
+			GameEvents.onGamePause.Add(onPause);
+			GameEvents.onGameUnpause.Add(onUnPause);
+			GameEvents.onVesselStandardModification.Add(OnVesselModified);
+		}
 
 		public override void OnStart(PartModule.StartState state)
 		{
@@ -139,15 +147,28 @@ namespace IRSurfaceSampler
 			}
 		}
 
+		private void onPause()
+		{
+			if (resultsDialog != null)
+				resultsDialog.gameObject.SetActive(false);
+		}
+
+		private void onUnPause()
+		{
+			if (resultsDialog != null)
+				resultsDialog.gameObject.SetActive(true);
+		}
+
 		//We update all the KSPEvents to make sure they are available when they should be
 		private void eventsCheck()
 		{
 			Events["ResetExperiment"].active = dataList.Count > 0;
 			Events["ReviewDataEvent"].active = dataList.Count > 0;
-			Events["ResetExperimentExternal"].active = dataList.Count > 0;
-			Events["CollectDataExternalEvent"].active = dataList.Count > 0;
+			Events["ResetExperimentExternal"].active = dataList.Count > 0 && resettableOnEVA;
+			Events["CollectDataExternalEvent"].active = dataList.Count > 0 && dataIsCollectable;
 			Events["DeployExperimentExternal"].active = Events["DeployExperiment"].active;
 			Events["CleanUpExperimentExternal"].active = Inoperable;
+			Events["TransferDataEvent"].active = hasContainer && dataIsCollectable && dataList.Count > 0;
 		}
 
 		//This overrides the base Deploy Experiment event, if the drill distance checks out it starts a timer to begin the experiment
@@ -425,6 +446,77 @@ namespace IRSurfaceSampler
 			}
 		}
 
+		new public void TransferDataEvent()
+		{
+			if (PartItemTransfer.Instance != null)
+			{
+				ScreenMessages.PostScreenMessage("<b><color=orange>A transfer is already in progress.</color></b>", 3f, ScreenMessageStyle.UPPER_CENTER);
+				return;
+			}
+
+			ExperimentTransfer.Create(part, this, new Callback<PartItemTransfer.DismissAction, Part>(transferData));
+		}
+
+		private void transferData(PartItemTransfer.DismissAction dismiss, Part p)
+		{
+			if (dismiss != PartItemTransfer.DismissAction.ItemMoved)
+				return;
+
+			if (p == null)
+				return;
+
+			if (dataList.Count <= 0)
+			{
+				ScreenMessages.PostScreenMessage(string.Format("[{0}]: has no data to transfer.", part.partInfo.title), 6, ScreenMessageStyle.UPPER_CENTER);
+				return;
+			}
+
+			ModuleScienceContainer container = p.FindModuleImplementing<ModuleScienceContainer>();
+
+			if (container == null)
+			{
+				ScreenMessages.PostScreenMessage(string.Format("<color=orange>[{0}]: {1} has no data container, canceling transfer.<color>", part.partInfo.title, p.partInfo.title), 6, ScreenMessageStyle.UPPER_CENTER);
+				return;
+			}
+
+			if (!rerunnable)
+			{
+				List<DialogGUIBase> dialog = new List<DialogGUIBase>();
+				dialog.Add(new DialogGUIButton<ModuleScienceContainer>("Remove Data", new Callback<ModuleScienceContainer>(onTransferData), container));
+				dialog.Add(new DialogGUIButton("Cancel", null, true));
+
+				PopupDialog.SpawnPopupDialog(
+					new Vector2(0.5f, 0.5f),
+					new Vector2(0.5f, 0.5f),
+					new MultiOptionDialog(
+						collectWarningText,
+						part.partInfo.title + "Warning!",
+						UISkinManager.defaultSkin,
+						dialog.ToArray()
+						),
+					false,
+					UISkinManager.defaultSkin,
+					true,
+					""
+					);
+			}
+			else
+				onTransferData(container);
+		}
+
+		private void onTransferData(ModuleScienceContainer target)
+		{
+			if (target == null)
+				return;
+
+			int i = dataList.Count;
+
+			if (target.StoreData(new List<IScienceDataContainer> { this }, false))
+				ScreenMessages.PostScreenMessage(string.Format("[{0}]: {1} Data stored.", target.part.partInfo.title, i), 6, ScreenMessageStyle.UPPER_LEFT);
+			else
+				ScreenMessages.PostScreenMessage(string.Format("<color=orange>[{0}]: Not all data was stored.</color>", target.part.partInfo.title), 6, ScreenMessageStyle.UPPER_LEFT);
+		}
+
 		/* These methods handle generating and interacting with the science results page */
 
 		private void newResultPage()
@@ -432,13 +524,14 @@ namespace IRSurfaceSampler
 			if (dataList.Count > 0)
 			{
 				ScienceData data = dataList[0];
-				ExperimentResultDialogPage page = new ExperimentResultDialogPage(part, data, data.transmitValue, ModuleScienceLab.GetBoostForVesselData(vessel, data), !rerunnable, transmitWarningText, true, new ScienceLabSearch(vessel, data), new Callback<ScienceData>(onDiscardData), new Callback<ScienceData>(onKeepData), new Callback<ScienceData>(onTransmitData), new Callback<ScienceData>(onSendToLab));
-				ExperimentsResultDialog.DisplayResult(page);
+				ExperimentResultDialogPage page = new ExperimentResultDialogPage(part, data, data.baseTransmitValue, 0, !rerunnable, transmitWarningText, true, new ScienceLabSearch(vessel, data), new Callback<ScienceData>(onDiscardData), new Callback<ScienceData>(onKeepData), new Callback<ScienceData>(onTransmitData), new Callback<ScienceData>(onSendToLab));
+				resultsDialog = ExperimentsResultDialog.DisplayResult(page);
 			}
 		}
 
 		private void onDiscardData(ScienceData data)
 		{
+			resultsDialog = null;
 			if (dataList.Count > 0)
 			{
 				dataList.Remove(data);
@@ -448,22 +541,29 @@ namespace IRSurfaceSampler
 
 		private void onKeepData(ScienceData data)
 		{
+			resultsDialog = null;
 		}
 
 		private void onTransmitData(ScienceData data)
 		{
-			List<IScienceDataTransmitter> tranList = vessel.FindPartModulesImplementing<IScienceDataTransmitter>();
-			if (tranList.Count > 0 && dataList.Count > 0)
+			resultsDialog = null;
+			IScienceDataTransmitter bestTransmitter = ScienceUtil.GetBestTransmitter(vessel);
+
+			if (bestTransmitter != null)
 			{
-				tranList.OrderBy(ScienceUtil.GetTransmitterScore).First().TransmitData(new List<ScienceData> { data });
+				bestTransmitter.TransmitData(new List<ScienceData> { data });
 				DumpData(data);
 			}
+			else if (CommNet.CommNetScenario.CommNetEnabled)
+				ScreenMessages.PostScreenMessage("No usable, in-range Comms Devices on this vessel. Cannot Transmit Data.", 3f, ScreenMessageStyle.UPPER_CENTER);
+			
 			else
 				ScreenMessages.PostScreenMessage("No Comms Devices on this vessel. Cannot Transmit Data.", 3f, ScreenMessageStyle.UPPER_CENTER);
 		}
 
 		private void onSendToLab(ScienceData data)
 		{
+			resultsDialog = null;
 			ScienceLabSearch labSearch = new ScienceLabSearch(vessel, data);
 
 			if (labSearch.NextLabForDataFound)
