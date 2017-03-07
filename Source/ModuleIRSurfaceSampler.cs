@@ -304,17 +304,20 @@ namespace IRSurfaceSampler
 				}
 
 				Transform hitT = hit.collider.transform;
+                Transform vesselMainbodyT = vessel.mainBody.GetTransform(); 
 				int i = 0;
 
 				//This loop keeps moving up the chain looking for a transform with a name that matches the current celestial body's name; it stops at a certain point
-				while (hitT != null && i < 100)
+
+                while (hitT != null && i < 100)
 				{
-					if (hitT.name.Contains(vessel.mainBody.name))
+                    if (hitT.name.Contains(vesselMainbodyT.name))
 						return true;
 					hitT = hitT.parent;
 					i++;
 				}
 			}
+
 
 			return false;
 		}
