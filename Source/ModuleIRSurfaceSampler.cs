@@ -191,10 +191,10 @@ namespace IRSurfaceSampler
 					StartCoroutine(waitForDeploy(modAst));
 				}
 				else
-					ScreenMessages.PostScreenMessage("IR Surface Sample Drill is not close enough for sample collection", 5f, ScreenMessageStyle.UPPER_CENTER);
+					ScreenMessages.PostScreenMessage(Localizer.Format("#autoLOC_IRSurfaceSampler_DrillDistance"), 5f, ScreenMessageStyle.UPPER_CENTER);
 			}
 			else
-				ScreenMessages.PostScreenMessage("Cannot collect any more samples", 5f, ScreenMessageStyle.UPPER_CENTER);
+				ScreenMessages.PostScreenMessage(Localizer.Format("#autoLOC_IRSurfaceSampler_Full"), 5f, ScreenMessageStyle.UPPER_CENTER);
 		}
 
 		new public void DeployAction(KSPActionParam actParams)
