@@ -29,6 +29,7 @@ using System.Collections;
 using System.Linq;
 using UnityEngine;
 using KSP.UI.Screens.Flight.Dialogs;
+using KSP.Localization;
 
 namespace IRSurfaceSampler
 {
@@ -53,6 +54,7 @@ namespace IRSurfaceSampler
 		private ScienceExperiment asteroidExp;
 		private List<ScienceData> dataList = new List<ScienceData>();
 		private ExperimentsResultDialog resultsDialog;
+		private Transform drillTrans;
 
 		private const string potato = "PotatoRoid";
 		private const string asteroidExperimentID = "asteroidSample";
@@ -95,6 +97,12 @@ namespace IRSurfaceSampler
 				else
 					Debug.LogError("[IRSurfaceSampler] Error locating audio file at location: " + audioFile);
 			}
+
+			if (!string.IsNullOrEmpty(drillTransform))
+				drillTrans = part.FindModelTransform(drillTransform);
+			if (!float.IsNaN(drillDistance))
+				scale = drillDistance * part.rescaleFactor;
+
 		}
 
 		public override void OnSave(ConfigNode node)
@@ -259,65 +267,49 @@ namespace IRSurfaceSampler
 		//the asteroid sample data.
 		private bool drillDistanceCheck(out ModuleAsteroid m)
 		{
-			Transform t = null;
-
-			if (!string.IsNullOrEmpty(drillTransform))
-				t = part.FindModelTransform(drillTransform);
-			if (!float.IsNaN(drillDistance))
-				scale = drillDistance * part.rescaleFactor;
-
 			m = null;
 
-			if (t == null || float.IsNaN(scale) || scale <= 0f)
+			if (drillTrans == null || float.IsNaN(scale) || scale <= 0f)
 			{
 				Debug.LogError("[IRSurfaceSampler] Something went wrong while assigning the drill transform or distance value; check the part config file");
 				return false;
 			}
 
 			RaycastHit hit = new RaycastHit();
-			Vector3 pos = t.position;
-			Ray ray = new Ray(pos, t.forward);
+			Vector3 pos = drillTrans.position;
+			Ray ray = new Ray(pos, drillTrans.forward);
+			int layer = 32769;
 
-			Physics.Raycast(ray, out hit, scale);
+			Physics.Raycast(ray, out hit, scale, layer);
 
 			if (hit.collider != null)
 			{
-				if (hit.collider.attachedRigidbody != null)
+				if (hit.collider.gameObject.layer == 0)
 				{
-					string obj = hit.collider.attachedRigidbody.gameObject.name;
-					if (!string.IsNullOrEmpty(obj))
+					if (hit.collider.attachedRigidbody != null)
 					{
-						if (obj.StartsWith(potato))
+						string obj = hit.collider.attachedRigidbody.gameObject.name;
+						if (!string.IsNullOrEmpty(obj))
 						{
-							Part p = Part.FromGO(hit.transform.gameObject) ?? hit.transform.gameObject.GetComponentInParent<Part>();
-
-							if (p != null)
+							if (obj.StartsWith(potato))
 							{
-								if (p.Modules.Contains("ModuleAsteroid"))
+								Part p = Part.FromGO(hit.transform.gameObject) ?? hit.transform.gameObject.GetComponentInParent<Part>();
+
+								if (p != null)
 								{
-									m = p.FindModuleImplementing<ModuleAsteroid>();
-									return true;
+									if (p.Modules.Contains("ModuleAsteroid"))
+									{
+										m = p.FindModuleImplementing<ModuleAsteroid>();
+										return true;
+									}
 								}
 							}
 						}
 					}
 				}
-
-				Transform hitT = hit.collider.transform;
-                Transform vesselMainbodyT = vessel.mainBody.GetTransform(); 
-				int i = 0;
-
-				//This loop keeps moving up the chain looking for a transform with a name that matches the current celestial body's name; it stops at a certain point
-
-                while (hitT != null && i < 100)
-				{
-                    if (hitT.name.Contains(vesselMainbodyT.name))
-						return true;
-					hitT = hitT.parent;
-					i++;
-				}
+				else if (hit.collider.gameObject.layer == 15)
+					return true;				
 			}
-
 
 			return false;
 		}
@@ -359,6 +351,7 @@ namespace IRSurfaceSampler
 			ExperimentSituations expSit;
 			ScienceData data = null;
 			string biome = "";
+			string displayBiome = "";
 
 			if (m != null)
 				exp = asteroidExp;
@@ -375,15 +368,21 @@ namespace IRSurfaceSampler
 				if (exp.BiomeIsRelevantWhile(expSit))
 				{
 					if (!string.IsNullOrEmpty(vessel.landedAt))
+					{
 						biome = Vessel.GetLandedAtString(vessel.landedAt);
+						displayBiome = Localizer.Format(vessel.displaylandedAt);
+					}
 					else
+					{
 						biome = ScienceUtil.GetExperimentBiome(vessel.mainBody, vessel.latitude, vessel.longitude);
+						displayBiome = Localizer.Format(ScienceUtil.GetExperimentBiomeLocalized(vessel.mainBody, vessel.latitude, vessel.longitude));
+					}
 				}
 
 				if (m != null)
-					sub = ResearchAndDevelopment.GetExperimentSubject(exp, expSit, m.part.partInfo.name + m.part.flightID, m.part.partInfo.title, vessel.mainBody, biome);
+					sub = ResearchAndDevelopment.GetExperimentSubject(exp, expSit, m.part.partInfo.name + m.part.flightID, m.part.partInfo.title, vessel.mainBody, biome, displayBiome);
 				else
-					sub = ResearchAndDevelopment.GetExperimentSubject(exp, expSit, vessel.mainBody, biome);
+					sub = ResearchAndDevelopment.GetExperimentSubject(exp, expSit, vessel.mainBody, biome, displayBiome);
 
 				if (sub == null)
 					return null;
@@ -443,7 +442,7 @@ namespace IRSurfaceSampler
 			if (FlightGlobals.ActiveVessel.isEVA)
 			{
 				if (!ScienceUtil.RequiredUsageExternalAvailable(part.vessel, FlightGlobals.ActiveVessel, (ExperimentUsageReqs)usageReqMaskExternal, surfaceExp, ref usageReqMessage))
-					ScreenMessages.PostScreenMessage("IR Surface Sampler does not meet the requirements for EVA experiment deployment", 6f, ScreenMessageStyle.UPPER_LEFT);
+					ScreenMessages.PostScreenMessage("<b><color=orange>" + usageReqMessage + "</color></b>", 6f, ScreenMessageStyle.UPPER_LEFT);
 				else
 					DeployExperiment();
 			}
@@ -453,7 +452,7 @@ namespace IRSurfaceSampler
 		{
 			if (PartItemTransfer.Instance != null)
 			{
-				ScreenMessages.PostScreenMessage("<b><color=orange>A transfer is already in progress.</color></b>", 3f, ScreenMessageStyle.UPPER_CENTER);
+				ScreenMessages.PostScreenMessage(Localizer.Format("#autoLOC_237449"), 3f, ScreenMessageStyle.UPPER_CENTER);
 				return;
 			}
 
@@ -470,7 +469,7 @@ namespace IRSurfaceSampler
 
 			if (dataList.Count <= 0)
 			{
-				ScreenMessages.PostScreenMessage(string.Format("[{0}]: has no data to transfer.", part.partInfo.title), 6, ScreenMessageStyle.UPPER_CENTER);
+				ScreenMessages.PostScreenMessage(Localizer.Format("#autoLOC_238567", part.partInfo.title), 6, ScreenMessageStyle.UPPER_CENTER);
 				return;
 			}
 
@@ -478,22 +477,23 @@ namespace IRSurfaceSampler
 
 			if (container == null)
 			{
-				ScreenMessages.PostScreenMessage(string.Format("<color=orange>[{0}]: {1} has no data container, canceling transfer.<color>", part.partInfo.title, p.partInfo.title), 6, ScreenMessageStyle.UPPER_CENTER);
+				ScreenMessages.PostScreenMessage(Localizer.Format("#autoLOC_238572", part.partInfo.title, p.partInfo.title), 6, ScreenMessageStyle.UPPER_CENTER);
 				return;
 			}
 
 			if (!rerunnable)
 			{
 				List<DialogGUIBase> dialog = new List<DialogGUIBase>();
-				dialog.Add(new DialogGUIButton<ModuleScienceContainer>("Remove Data", new Callback<ModuleScienceContainer>(onTransferData), container));
-				dialog.Add(new DialogGUIButton("Cancel", null, true));
+				dialog.Add(new DialogGUIButton<ModuleScienceContainer>(Localizer.Format("#autoLOC_7003412"), new Callback<ModuleScienceContainer>(onTransferData), container));
+				dialog.Add(new DialogGUIButton(Localizer.Format("#autoLOC_236419"), null, true));
 
 				PopupDialog.SpawnPopupDialog(
 					new Vector2(0.5f, 0.5f),
 					new Vector2(0.5f, 0.5f),
 					new MultiOptionDialog(
+						"DataWarning",
 						collectWarningText,
-						part.partInfo.title + "Warning!",
+						Localizer.Format("#autoLOC_238556", part.partInfo.title),
 						UISkinManager.defaultSkin,
 						dialog.ToArray()
 						),
@@ -515,9 +515,9 @@ namespace IRSurfaceSampler
 			int i = dataList.Count;
 
 			if (target.StoreData(new List<IScienceDataContainer> { this }, false))
-				ScreenMessages.PostScreenMessage(string.Format("[{0}]: {1} Data stored.", target.part.partInfo.title, i), 6, ScreenMessageStyle.UPPER_LEFT);
+				ScreenMessages.PostScreenMessage(Localizer.Format("#autoLOC_238582", target.part.partInfo.title), 6, ScreenMessageStyle.UPPER_LEFT);
 			else
-				ScreenMessages.PostScreenMessage(string.Format("<color=orange>[{0}]: Not all data was stored.</color>", target.part.partInfo.title), 6, ScreenMessageStyle.UPPER_LEFT);
+				ScreenMessages.PostScreenMessage(Localizer.Format("#autoLOC_238589", target.part.partInfo.title), 6, ScreenMessageStyle.UPPER_LEFT);
 		}
 
 		/* These methods handle generating and interacting with the science results page */
@@ -558,10 +558,10 @@ namespace IRSurfaceSampler
 				DumpData(data);
 			}
 			else if (CommNet.CommNetScenario.CommNetEnabled)
-				ScreenMessages.PostScreenMessage("No usable, in-range Comms Devices on this vessel. Cannot Transmit Data.", 3f, ScreenMessageStyle.UPPER_CENTER);
+				ScreenMessages.PostScreenMessage(Localizer.Format("#autoLOC_237738"), 3f, ScreenMessageStyle.UPPER_CENTER);
 			
 			else
-				ScreenMessages.PostScreenMessage("No Comms Devices on this vessel. Cannot Transmit Data.", 3f, ScreenMessageStyle.UPPER_CENTER);
+				ScreenMessages.PostScreenMessage(Localizer.Format("#autoLOC_237740"), 3f, ScreenMessageStyle.UPPER_CENTER);
 		}
 
 		private void onSendToLab(ScienceData data)
